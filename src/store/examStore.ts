@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import type { Question, ExamSession, ExamResult, Category } from '../types';
+import type { Question, ExamSession, ExamResult, Category, AccessTier } from '../types';
 import { getRandomExamQuestions, allQuestions } from '../data/questions';
 
 interface DrillSession {
@@ -21,6 +21,8 @@ interface ExamState {
   studyStreak: number;
   lastStudyDate: string | null;
   masteryLevel: Record<string, number>;
+  accessTier: AccessTier;
+  originalTier: AccessTier; // Track if they bought study first for upgrade pricing
   
   // Actions
   startExam: (questionCount?: number) => void;
@@ -36,6 +38,13 @@ interface ExamState {
   skipQuestion: () => void;
   updateMastery: (questionId: string, correct: boolean) => void;
   completeDrill: () => void;
+  setAccessTier: (tier: AccessTier) => void;
+  upgradeTier: (newTier: AccessTier) => void;
+  // Feature checks
+  canAccessStudy: () => boolean;
+  canAccessExams: () => boolean;
+  canAccessFullStudy: () => boolean;
+  canAccessDrillMode: () => boolean;
 }
 
 export const useExamStore = create<ExamState>()(
@@ -48,6 +57,8 @@ export const useExamStore = create<ExamState>()(
       studyStreak: 0,
       lastStudyDate: null,
       masteryLevel: {},
+      accessTier: 'free',
+      originalTier: 'free',
 
       startExam: (questionCount = 60) => {
         const questions = getRandomExamQuestions(questionCount);
@@ -132,6 +143,48 @@ export const useExamStore = create<ExamState>()(
             currentIndex: nextIndex,
           },
         });
+      },
+
+      setAccessTier: (tier) => {
+        set({ accessTier: tier });
+        if (tier !== 'free') {
+          set({ originalTier: tier });
+        }
+      },
+
+      upgradeTier: (newTier) => {
+        const { originalTier } = get();
+        // Only allow upgrades, not downgrades
+        const tierValues: Record<AccessTier, number> = { free: 0, study: 1, exam: 1, full: 2 };
+        if (tierValues[newTier] > tierValues[get().accessTier]) {
+          set({ accessTier: newTier });
+          // Track if they started with study guide for discount logic
+          if (originalTier === 'free' && newTier !== 'free') {
+            set({ originalTier: newTier });
+          }
+        }
+      },
+
+      // Feature gate checks
+      canAccessStudy: () => {
+        const { accessTier } = get();
+        return ['study', 'full'].includes(accessTier);
+      },
+
+      canAccessExams: () => {
+        const { accessTier } = get();
+        return ['exam', 'full'].includes(accessTier);
+      },
+
+      canAccessFullStudy: () => {
+        const { accessTier } = get();
+        return accessTier === 'full' || accessTier === 'study';
+      },
+
+      canAccessDrillMode: () => {
+        const { accessTier } = get();
+        // Drill mode requires both study and exam access
+        return accessTier === 'full';
       },
 
       completeDrill: () => {

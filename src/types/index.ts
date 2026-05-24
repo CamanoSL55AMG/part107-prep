@@ -55,3 +55,18 @@ export interface StudySection {
   content: string;
   progress: number;
 }
+
+// Access tiers for tiered pricing model
+export type AccessTier = 'free' | 'study' | 'exam' | 'full';
+
+// Pricing configuration
+export interface PricingTier {
+  id: AccessTier;
+  name: string;
+  description: string;
+  price: number;
+  originalPrice?: number; // For showing discount
+  features: string[];
+  cta: string;
+  popular?: boolean;
+}
