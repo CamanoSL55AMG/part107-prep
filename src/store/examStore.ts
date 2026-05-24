@@ -3,8 +3,19 @@ import { persist } from 'zustand/middleware';
 import type { Question, ExamSession, ExamResult, Category } from '../types';
 import { getRandomExamQuestions, allQuestions } from '../data/questions';
 
+interface DrillSession {
+  id: string;
+  questions: Question[];
+  answers: Record<string, number>;
+  correctCount: Record<string, number>;
+  currentIndex: number;
+  startTime: Date;
+  sourceExamId?: string;
+}
+
 interface ExamState {
   currentSession: ExamSession | null;
+  drillSession: DrillSession | null;
   examHistory: ExamResult[];
   questionStats: Record<string, { attempts: number; correct: number }>;
   studyStreak: number;
@@ -13,20 +24,25 @@ interface ExamState {
   
   // Actions
   startExam: (questionCount?: number) => void;
+  startDrill: (questionIds: string[], sourceExamId?: string) => void;
   answerQuestion: (questionId: string, answerIndex: number) => void;
+  answerDrillQuestion: (questionId: string, answerIndex: number) => { correct: boolean; mastered: boolean };
   flagQuestion: (questionId: string) => void;
   unflagQuestion: (questionId: string) => void;
   nextQuestion: () => void;
   prevQuestion: () => void;
+  nextDrillQuestion: () => void;
   submitExam: () => ExamResult;
   skipQuestion: () => void;
   updateMastery: (questionId: string, correct: boolean) => void;
+  completeDrill: () => void;
 }
 
 export const useExamStore = create<ExamState>()(
   persist(
     (set, get) => ({
       currentSession: null,
+      drillSession: null,
       examHistory: [],
       questionStats: {},
       studyStreak: 0,
@@ -43,7 +59,105 @@ export const useExamStore = create<ExamState>()(
           startTime: new Date(),
           currentIndex: 0,
         };
-        set({ currentSession: session });
+        set({ currentSession: session, drillSession: null });
+      },
+
+      startDrill: (questionIds, sourceExamId) => {
+        const questions = questionIds
+          .map((id) => allQuestions.find((q) => q.id === id))
+          .filter((q): q is Question => q !== undefined);
+        
+        if (questions.length === 0) return;
+        
+        const drill: DrillSession = {
+          id: Date.now().toString(),
+          questions,
+          answers: {},
+          correctCount: {},
+          currentIndex: 0,
+          startTime: new Date(),
+          sourceExamId,
+        };
+        set({ drillSession: drill, currentSession: null });
+      },
+
+      answerDrillQuestion: (questionId, answerIndex) => {
+        const { drillSession, masteryLevel } = get();
+        if (!drillSession) return { correct: false, mastered: false };
+
+        const question = drillSession.questions.find((q) => q.id === questionId);
+        if (!question) return { correct: false, mastered: false };
+
+        const isCorrect = answerIndex === question.correctAnswer;
+        const currentCorrectCount = drillSession.correctCount[questionId] || 0;
+        const newCorrectCount = isCorrect ? currentCorrectCount + 1 : 0;
+        
+        // Update mastery level
+        if (isCorrect) {
+          masteryLevel[questionId] = (masteryLevel[questionId] || 0) + 1;
+        }
+
+        const updatedDrill: DrillSession = {
+          ...drillSession,
+          answers: { ...drillSession.answers, [questionId]: answerIndex },
+          correctCount: { ...drillSession.correctCount, [questionId]: newCorrectCount },
+        };
+
+        set({ drillSession: updatedDrill, masteryLevel });
+
+        // Mastered if answered correctly 2 times in a row
+        const mastered = newCorrectCount >= 2;
+
+        return { correct: isCorrect, mastered };
+      },
+
+      nextDrillQuestion: () => {
+        const { drillSession } = get();
+        if (!drillSession) return;
+
+        // Move to next question that hasn't been mastered
+        let nextIndex = drillSession.currentIndex;
+        for (let i = 1; i <= drillSession.questions.length; i++) {
+          const checkIndex = (drillSession.currentIndex + i) % drillSession.questions.length;
+          const q = drillSession.questions[checkIndex];
+          if ((drillSession.correctCount[q.id] || 0) < 2) {
+            nextIndex = checkIndex;
+            break;
+          }
+        }
+
+        set({
+          drillSession: {
+            ...drillSession,
+            currentIndex: nextIndex,
+          },
+        });
+      },
+
+      completeDrill: () => {
+        const today = new Date().toISOString().split('T')[0];
+        const lastDate = get().lastStudyDate;
+        let streak = get().studyStreak;
+        
+        if (lastDate) {
+          const last = new Date(lastDate);
+          const now = new Date(today);
+          const diffDays = Math.floor((now.getTime() - last.getTime()) / (1000 * 60 * 60 * 24));
+          
+          if (diffDays === 1) {
+            streak++;
+          } else if (diffDays > 1) {
+            streak = 1;
+          }
+        } else {
+          streak = 1;
+        }
+
+        set({
+          drillSession: null,
+          studyStreak: streak,
+          lastStudyDate: today,
+        });
       },
 
       answerQuestion: (questionId, answerIndex) => {

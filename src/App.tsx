@@ -1,9 +1,9 @@
 import { useState } from 'react';
-import { allQuestions, getRandomExamQuestions } from './data/questions';
+import { allQuestions } from './data/questions';
 import { useExamStore } from './store/examStore';
 import type { Category } from './types';
 
-type View = 'home' | 'study' | 'exam' | 'results' | 'review';
+type View = 'home' | 'study' | 'exam' | 'results' | 'review' | 'drill';
 
 const categoryLabels: Record<Category, string> = {
   airspace: 'Airspace',
@@ -24,16 +24,21 @@ function App() {
   
   const { 
     currentSession, 
+    drillSession,
     examHistory, 
     studyStreak,
     startExam, 
+    startDrill,
     answerQuestion, 
+    answerDrillQuestion,
     flagQuestion, 
     unflagQuestion,
     nextQuestion, 
     prevQuestion, 
+    nextDrillQuestion,
     submitExam,
     skipQuestion,
+    completeDrill,
   } = useExamStore();
 
   const handleStartExam = () => {
@@ -51,6 +56,11 @@ function App() {
     setStudyIndex(0);
     setShowExplanation(false);
     setView('study');
+  };
+
+  const handleStartDrill = (missedIds: string[], sourceExamId?: string) => {
+    startDrill(missedIds, sourceExamId);
+    setView('drill');
   };
 
   // Home View
@@ -266,6 +276,23 @@ function App() {
             </div>
           </div>
 
+          {/* Missed Questions Review */}
+          {result.missedQuestions.length > 0 && (
+            <div className="bg-white p-6 rounded-lg shadow">
+              <h2 className="text-xl font-bold mb-4">Review Missed Questions</h2>
+              <p className="text-gray-600 mb-4">
+                You missed {result.missedQuestions.length} question{result.missedQuestions.length > 1 ? 's' : ''}. 
+                Use Weak Area Drill to master these questions.
+              </p>
+              <button
+                onClick={() => handleStartDrill(result.missedQuestions, result.id)}
+                className="w-full bg-orange-600 text-white py-3 rounded-lg font-semibold hover:bg-orange-700"
+              >
+                🎯 Study Missed Questions ({result.missedQuestions.length})
+              </button>
+            </div>
+          )}
+
           {/* Actions */}
           <div className="flex gap-4">
             <button
@@ -286,43 +313,90 @@ function App() {
     );
   }
 
-  // Study View
+  // Study View - Beginner-friendly with immediate feedback
   if (view === 'study' && studyCategory) {
     const questions = allQuestions.filter((q) => q.category === studyCategory);
     const question = questions[studyIndex];
+    const [studyAnswer, setStudyAnswer] = useState<number | null>(null);
+
+    const handleStudyAnswer = (idx: number) => {
+      setStudyAnswer(idx);
+      setShowExplanation(true);
+    };
+
+    const handleNext = () => {
+      setStudyAnswer(null);
+      setShowExplanation(false);
+      if (studyIndex < questions.length - 1) {
+        setStudyIndex(studyIndex + 1);
+      } else {
+        setView('home');
+      }
+    };
 
     return (
       <div className="min-h-screen bg-gray-50">
         <header className="bg-blue-600 text-white p-4">
-          <h1 className="text-2xl font-bold">{categoryLabels[studyCategory]}</h1>
-          <p className="text-blue-100">Question {studyIndex + 1} of {questions.length}</p>
+          <div className="max-w-4xl mx-auto">
+            <h1 className="text-2xl font-bold">{categoryLabels[studyCategory]}</h1>
+            <p className="text-blue-100">Study Mode - Question {studyIndex + 1} of {questions.length}</p>
+          </div>
         </header>
 
         <main className="max-w-4xl mx-auto p-4">
           <div className="bg-white rounded-lg shadow p-6">
+            {/* Mode Badge */}
+            <div className="mb-4">
+              <span className="bg-green-100 text-green-800 px-3 py-1 rounded-full text-sm font-medium">
+                Beginner Study Guide
+              </span>
+            </div>
+
             <h2 className="text-lg font-semibold mb-6">{question.question}</h2>
 
             <div className="space-y-3">
-              {question.options.map((option, idx) => (
-                <button
-                  key={idx}
-                  onClick={() => setShowExplanation(true)}
-                  className="w-full text-left p-4 rounded-lg border-2 border-gray-200 hover:border-blue-300 transition"
-                >
-                  <span className="font-bold mr-3">{String.fromCharCode(65 + idx)}.</span>
-                  {option}
-                </button>
-              ))}
+              {question.options.map((option, idx) => {
+                const isSelected = studyAnswer === idx;
+                const isCorrect = idx === question.correctAnswer;
+                const showCorrect = showExplanation && isCorrect;
+                const showWrong = showExplanation && isSelected && !isCorrect;
+
+                return (
+                  <button
+                    key={idx}
+                    onClick={() => !showExplanation && handleStudyAnswer(idx)}
+                    disabled={showExplanation}
+                    className={`w-full text-left p-4 rounded-lg border-2 transition ${
+                      showCorrect
+                        ? 'border-green-500 bg-green-50'
+                        : showWrong
+                        ? 'border-red-500 bg-red-50'
+                        : isSelected
+                        ? 'border-blue-500 bg-blue-50'
+                        : 'border-gray-200 hover:border-blue-300'
+                    }`}
+                  >
+                    <div className="flex items-center">
+                      <span className={`font-bold mr-3 w-8 h-8 rounded-full flex items-center justify-center ${
+                        showCorrect ? 'bg-green-500 text-white' : showWrong ? 'bg-red-500 text-white' : 'bg-gray-200'
+                      }`}>
+                        {String.fromCharCode(65 + idx)}
+                      </span>
+                      <span className="flex-1">{option}</span>
+                      {showCorrect && <span className="text-green-600 font-bold">✓ Correct</span>}
+                      {showWrong && <span className="text-red-600 font-bold">✗ Incorrect</span>}
+                    </div>
+                  </button>
+                );
+              })}
             </div>
 
             {showExplanation && (
-              <div className="mt-6 p-4 bg-blue-50 rounded-lg">
-                <p className="font-semibold text-green-700 mb-2">
-                  Correct Answer: {String.fromCharCode(65 + question.correctAnswer)}
-                </p>
+              <div className="mt-6 p-4 bg-blue-50 rounded-lg border-l-4 border-blue-500">
+                <h3 className="font-semibold text-blue-900 mb-2">Explanation</h3>
                 <p className="text-gray-700">{question.explanation}</p>
                 {question.reference && (
-                  <p className="text-sm text-gray-500 mt-2">Reference: {question.reference}</p>
+                  <p className="text-sm text-gray-500 mt-3">Reference: {question.reference}</p>
                 )}
               </div>
             )}
@@ -330,23 +404,164 @@ function App() {
             <div className="flex justify-between mt-6">
               <button
                 onClick={() => setView('home')}
-                className="px-4 py-2 bg-gray-200 rounded"
+                className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300"
               >
-                Exit
+                Exit Study
               </button>
               <button
-                onClick={() => {
-                  setShowExplanation(false);
-                  if (studyIndex < questions.length - 1) {
-                    setStudyIndex(studyIndex + 1);
-                  } else {
-                    setView('home');
-                  }
-                }}
-                className="px-4 py-2 bg-blue-600 text-white rounded"
+                onClick={handleNext}
+                className="px-4 py-2 bg-blue-600 text-white rounded hover:bg-blue-700"
               >
-                {studyIndex < questions.length - 1 ? 'Next →' : 'Finish'}
+                {studyIndex < questions.length - 1 ? 'Next Question →' : 'Finish Study'}
               </button>
+            </div>
+          </div>
+        </main>
+      </div>
+    );
+  }
+
+  // Drill View - Weak Area Mode (post-exam)
+  if (view === 'drill' && drillSession) {
+    const question = drillSession.questions[drillSession.currentIndex];
+    const progress = drillSession.questions.filter((q) => (drillSession.correctCount[q.id] || 0) >= 2).length;
+    const totalMaster = drillSession.questions.length;
+    const [drillResult, setDrillResult] = useState<{ correct: boolean; mastered: boolean } | null>(null);
+
+    const handleDrillAnswer = (idx: number) => {
+      const result = answerDrillQuestion(question.id, idx);
+      setDrillResult(result);
+    };
+
+    const handleDrillNext = () => {
+      setDrillResult(null);
+      
+      // Check if all questions are mastered
+      const allMastered = drillSession.questions.every((q) => (drillSession.correctCount[q.id] || 0) >= 2);
+      if (allMastered) {
+        completeDrill();
+        setView('home');
+      } else {
+        nextDrillQuestion();
+      }
+    };
+
+    return (
+      <div className="min-h-screen bg-gray-50">
+        <header className="bg-orange-600 text-white p-4">
+          <div className="max-w-4xl mx-auto flex justify-between items-center">
+            <div>
+              <h1 className="text-2xl font-bold">Weak Area Drill</h1>
+              <p className="text-orange-100">Master missed questions (need 2 correct in a row)</p>
+            </div>
+            <div className="text-right">
+              <p className="text-2xl font-bold">{progress}/{totalMaster}</p>
+              <p className="text-sm text-orange-200">Mastered</p>
+            </div>
+          </div>
+        </header>
+
+        <main className="max-w-4xl mx-auto p-4">
+          <div className="bg-white rounded-lg shadow p-6">
+            {/* Mastery indicator for this question */}
+            <div className="mb-4 flex items-center gap-2">
+              <span className="text-sm text-gray-600">Current question mastery:</span>
+              <div className="flex gap-1">
+                {[0, 1].map((i) => (
+                  <div
+                    key={i}
+                    className={`w-6 h-6 rounded-full ${
+                      (drillSession.correctCount[question.id] || 0) > i
+                        ? 'bg-green-500'
+                        : 'bg-gray-200'
+                    }`}
+                  />
+                ))}
+              </div>
+            </div>
+
+            <h2 className="text-lg font-semibold mb-6">{question.question}</h2>
+
+            <div className="space-y-3">
+              {question.options.map((option, idx) => {
+                const isAnswered = drillResult !== null;
+                const isSelected = drillSession.answers[question.id] === idx;
+                const isCorrect = idx === question.correctAnswer;
+                const showCorrect = isAnswered && isCorrect;
+                const showWrong = isAnswered && isSelected && !isCorrect;
+
+                return (
+                  <button
+                    key={idx}
+                    onClick={() => !isAnswered && handleDrillAnswer(idx)}
+                    disabled={isAnswered}
+                    className={`w-full text-left p-4 rounded-lg border-2 transition ${
+                      showCorrect
+                        ? 'border-green-500 bg-green-50'
+                        : showWrong
+                        ? 'border-red-500 bg-red-50'
+                        : isSelected
+                        ? 'border-blue-500 bg-blue-50'
+                        : 'border-gray-200 hover:border-blue-300'
+                    }`}
+                  >
+                    <div className="flex items-center">
+                      <span className={`font-bold mr-3 w-8 h-8 rounded-full flex items-center justify-center ${
+                        showCorrect ? 'bg-green-500 text-white' : showWrong ? 'bg-red-500 text-white' : 'bg-gray-200'
+                      }`}>
+                        {String.fromCharCode(65 + idx)}
+                      </span>
+                      <span className="flex-1">{option}</span>
+                      {showCorrect && <span className="text-green-600 font-bold">✓ Correct</span>}
+                      {showWrong && <span className="text-red-600 font-bold">✗ Incorrect</span>}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+
+            {drillResult && (
+              <div className={`mt-6 p-4 rounded-lg border-l-4 ${
+                drillResult.mastered 
+                  ? 'bg-green-50 border-green-500' 
+                  : drillResult.correct 
+                  ? 'bg-blue-50 border-blue-500'
+                  : 'bg-red-50 border-red-500'
+              }`}>
+                <h3 className={`font-semibold mb-2 ${
+                  drillResult.mastered ? 'text-green-900' : drillResult.correct ? 'text-blue-900' : 'text-red-900'
+                }`}>
+                  {drillResult.mastered 
+                    ? '🎉 Question Mastered!' 
+                    : drillResult.correct 
+                    ? '✓ Correct! Answer once more to master.' 
+                    : '✗ Incorrect. Review the explanation.'}
+                </h3>
+                <p className="text-gray-700">{question.explanation}</p>
+                {question.reference && (
+                  <p className="text-sm text-gray-500 mt-3">Reference: {question.reference}</p>
+                )}
+              </div>
+            )}
+
+            <div className="flex justify-between mt-6">
+              <button
+                onClick={() => {
+                  completeDrill();
+                  setView('home');
+                }}
+                className="px-4 py-2 bg-gray-200 rounded hover:bg-gray-300"
+              >
+                Exit Drill
+              </button>
+              {drillResult && (
+                <button
+                  onClick={handleDrillNext}
+                  className="px-4 py-2 bg-orange-600 text-white rounded hover:bg-orange-700"
+                >
+                  Continue →
+                </button>
+              )}
             </div>
           </div>
         </main>
